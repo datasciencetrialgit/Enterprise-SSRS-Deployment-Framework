@@ -1,0 +1,75 @@
+# PowerShell and SSRS Deployment .gitignore
+
+# Logs
+*.log
+Logs/
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# PowerShell profile and session files
+profile.ps1
+Microsoft.PowerShell_profile.ps1
+
+# VS Code settings (optional - uncomment if you don't want to share)
+# .vscode/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Credentials and sensitive files
+*.credentials
+credentials.json
+secrets.json
+passwords.txt
+
+# Environment-specific config files (keep templates)
+*-config-local.json
+*-config-dev.json
+*-config-test.json
+*-config-prod.json
+
+# Backup files
+*.bak
+*.backup
+*-backup.*
+
+# Archives
+*.zip
+*.7z
+*.tar.gz
+
+# PowerShell Gallery downloads
+packages/
+lib/
+
+# Test results
+TestResults/
+*.xml
+
+# Coverage reports
+coverage/
+*.coverage
+
+# Build outputs (if using build tools)
+out/
+dist/
+build/
+
+# Node.js (if using any JS tools)
+node_modules/
+npm-debug.log*
+
+# Package files (keep source, ignore built packages)
+*.nupkg
+*.zip
+
+# Personal notes
+TODO.md
+NOTES.md

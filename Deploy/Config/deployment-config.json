@@ -1,0 +1,50 @@
+{
+  "DataSources": {
+    "DefaultConnectionStrings": {
+      "Dev": "Data Source=data\\datas;Initial Catalog=AdventureWorks2019;Integrated Security=True",
+      "Test": "Data Source=data\\datas;Initial Catalog=AdventureWorks2019;Integrated Security=True",
+      "Prod": "Data Source=data\\datas;Initial Catalog=AdventureWorks2019;Integrated Security=True"
+    },
+    "Extension": "SQL",
+    "CredentialRetrieval": "Integrated"
+  },
+  "Deployment": {
+    "CreateFolders": true,
+    "OverwriteExisting": true,
+    "CreateDataSources": true,
+    "CreateDataSets": true,
+    "CreateReports": true
+  },
+  "Security": {
+    "Authentication": {
+      "UseCurrentUser": true,
+      "PromptForCredentials": false,
+      "Domain": "",
+      "Username": ""
+    },
+    "DefaultRoles": [
+      {
+        "GroupUserName": "BUILTIN\\Administrators",
+        "Roles": ["Content Manager"]
+      },
+      {
+        "GroupUserName": "Everyone",
+        "Roles": ["Browser"]
+      }
+    ]
+  },
+  "Environments": {
+    "Dev": {
+      "ReportServerUrl": "http://data/ReportServer",
+      "ReportManagerUrl": "http://data/Reports"
+    },
+    "Test": {
+      "ReportServerUrl": "http://data/ReportServer",
+      "ReportManagerUrl": "http://data/Reports"
+    },
+    "Prod": {
+      "ReportServerUrl": "http://data/ReportServer",
+      "ReportManagerUrl": "http://data/Reports"
+    }
+  }
+}
