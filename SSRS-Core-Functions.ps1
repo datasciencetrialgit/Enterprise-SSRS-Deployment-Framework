@@ -27,41 +27,6 @@ $Global:SSRSProxy = $null
 # UTILITY FUNCTIONS
 # ======================================================================
 
-function Hide-PasswordInText {
-    <#
-    .SYNOPSIS
-        Masks potential passwords in text to prevent them from appearing in logs or console output.
-    
-    .PARAMETER Text
-        The text to mask passwords in.
-    #>
-    param(
-        [string]$Text
-    )
-    
-    if ([string]::IsNullOrEmpty($Text)) {
-        return $Text
-    }
-    
-    # Mask various password patterns
-    $MaskedText = $Text
-    
-    # Mask specific known test passwords (add test passwords here, not real ones)
-    $MaskedText = $MaskedText -replace "TestPassword123", "*****"
-    
-    # Mask command-line password parameters
-    $MaskedText = $MaskedText -replace "-Pwd\s+\S+", "-Pwd *****"
-    $MaskedText = $MaskedText -replace "-Password\s+\S+", "-Password *****"
-    
-    # Mask common password patterns in XML/connection strings
-    $MaskedText = $MaskedText -replace "password\s*=\s*[^;\s]+", "password=*****" -replace "pwd\s*=\s*[^;\s]+", "pwd=*****"
-    
-    # Mask authentication tokens or other sensitive patterns  
-    $MaskedText = $MaskedText -replace "(?i)(password|pwd|token|secret|key)\s*[:=]\s*[^\s;,]+", "`$1=*****"
-    
-    return $MaskedText
-}
-
 # ======================================================================
 # CORE SSRS CONNECTION FUNCTIONS
 # ======================================================================
@@ -112,8 +77,7 @@ function Connect-RsReportServer {
         return $true
     }
     catch {
-        $MaskedError = Hide-PasswordInText -Text $_.Exception.Message
-        Write-Host "Failed to connect to SSRS server: $MaskedError" -ForegroundColor Red
+        Write-Host "Failed to connect to SSRS server: $($_.Exception.Message)" -ForegroundColor Red
         $Global:SSRSConnection = $null
         $Global:SSRSProxy = $null
         throw
@@ -178,8 +142,7 @@ function New-RsFolder {
         return $NewFolder
     }
     catch {
-        $MaskedError = Hide-PasswordInText -Text $_.Exception.Message
-        Write-Host "Failed to create folder: $MaskedError" -ForegroundColor Red
+        Write-Host "Failed to create folder: $($_.Exception.Message)" -ForegroundColor Red
         throw
     }
 }
@@ -212,8 +175,7 @@ function Get-RsFolderContent {
         return $Items
     }
     catch {
-        $MaskedError = Hide-PasswordInText -Text $_.Exception.Message
-        Write-Host "Failed to get folder content: $MaskedError" -ForegroundColor Red
+        Write-Host "Failed to get folder content: $($_.Exception.Message)" -ForegroundColor Red
         throw
     }
 }
@@ -264,9 +226,9 @@ function New-SSRSFolder {
                 New-RsFolder -FolderName $Part -ParentPath $ParentPath
                 Write-Host "  Successfully created: $CurrentPath" -ForegroundColor Green
             }
-        }            catch {
-                $MaskedError = Hide-PasswordInText -Text $_.Exception.Message
-                Write-Host "  Error with folder ${CurrentPath}: $MaskedError" -ForegroundColor Red
+        }
+        catch {
+            Write-Host "  Error with folder ${CurrentPath}: $($_.Exception.Message)" -ForegroundColor Red
             # Continue with next folder rather than failing completely
         }
     }
@@ -336,33 +298,36 @@ function New-RsDataSource {
             $ExistingDS = $ExistingItems | Where-Object { $_.Name -eq $Name -and $_.TypeName -eq "DataSource" }
             
             if ($ExistingDS) {
-                Write-Host "Data source already exists: $Name" -ForegroundColor Yellow
+                Write-Host "Data source already exists, skipping deployment: $Name" -ForegroundColor Yellow
+                # Add metadata to indicate this was skipped
+                $ExistingDS | Add-Member -NotePropertyName "WasSkipped" -NotePropertyValue $true -Force
                 return $ExistingDS
             }
         }
         
         # Create data source definition
-        $DataSourceDefinition = New-Object -TypeName "ReportingService.DataSourceDefinition"
+        $DataSourceDefinition = New-Object -TypeName "$($Global:SSRSProxy.GetType().Namespace).DataSourceDefinition"
         $DataSourceDefinition.Extension = $Extension
-        $DataSourceDefinition.ConnectionString = $ConnectionString
+        $DataSourceDefinition.ConnectString = $ConnectionString
         
-        # Set credential retrieval
+        # Set credential retrieval using the proxy's enum types
+        $CredentialRetrievalEnum = "$($Global:SSRSProxy.GetType().Namespace).CredentialRetrievalEnum" -as [Type]
         switch ($CredentialRetrieval.ToLower()) {
             "integrated" {
-                $DataSourceDefinition.CredentialRetrieval = [ReportingService.CredentialRetrievalEnum]::Integrated
+                $DataSourceDefinition.CredentialRetrieval = [Enum]::Parse($CredentialRetrievalEnum, "Integrated")
             }
             "store" {
-                $DataSourceDefinition.CredentialRetrieval = [ReportingService.CredentialRetrievalEnum]::Store
+                $DataSourceDefinition.CredentialRetrieval = [Enum]::Parse($CredentialRetrievalEnum, "Store")
                 if ($DatasourceCredentials) {
                     $DataSourceDefinition.UserName = $DatasourceCredentials.UserName
                     $DataSourceDefinition.Password = $DatasourceCredentials.GetNetworkCredential().Password
                 }
             }
             "prompt" {
-                $DataSourceDefinition.CredentialRetrieval = [ReportingService.CredentialRetrievalEnum]::Prompt
+                $DataSourceDefinition.CredentialRetrieval = [Enum]::Parse($CredentialRetrievalEnum, "Prompt")
             }
             "none" {
-                $DataSourceDefinition.CredentialRetrieval = [ReportingService.CredentialRetrievalEnum]::None
+                $DataSourceDefinition.CredentialRetrieval = [Enum]::Parse($CredentialRetrievalEnum, "None")
             }
         }
         
@@ -375,8 +340,7 @@ function New-RsDataSource {
         Write-Host "Successfully created data source: $Name" -ForegroundColor Green
     }
     catch {
-        $MaskedError = Hide-PasswordInText -Text $_.Exception.Message
-        Write-Host "Failed to create data source: $MaskedError" -ForegroundColor Red
+        Write-Host "Failed to create data source: $($_.Exception.Message)" -ForegroundColor Red
         throw
     }
 }
@@ -398,6 +362,9 @@ function Write-RsCatalogItem {
     
     .PARAMETER Overwrite
         Overwrite existing item.
+    
+    .PARAMETER Name
+        Optional name for the item on SSRS. If not provided, uses the filename.
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -407,7 +374,10 @@ function Write-RsCatalogItem {
         [string]$RsFolder,
         
         [Parameter(Mandatory = $false)]
-        [switch]$Overwrite
+        [switch]$Overwrite,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Name
     )
     
     Assert-SSRSConnection
@@ -417,7 +387,7 @@ function Write-RsCatalogItem {
             throw "File not found: $Path"
         }
         
-        $FileName = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+        $FileName = if ($Name) { $Name } else { [System.IO.Path]::GetFileNameWithoutExtension($Path) }
         $FileExtension = [System.IO.Path]::GetExtension($Path).ToLower()
         
         Write-Host "Deploying file: $FileName$FileExtension" -ForegroundColor Cyan
@@ -439,7 +409,9 @@ function Write-RsCatalogItem {
             $ExistingItem = $ExistingItems | Where-Object { $_.Name -eq $FileName -and $_.TypeName -eq $ItemType }
             
             if ($ExistingItem) {
-                Write-Host "Item already exists: $FileName" -ForegroundColor Yellow
+                Write-Host "$ItemType already exists, skipping deployment: $FileName" -ForegroundColor Yellow
+                # Add metadata to indicate this was skipped
+                $ExistingItem | Add-Member -NotePropertyName "WasSkipped" -NotePropertyValue $true -Force
                 return $ExistingItem
             }
         }
@@ -468,9 +440,395 @@ function Write-RsCatalogItem {
         Write-Host "Successfully deployed: $FileName" -ForegroundColor Green
     }
     catch {
-        $MaskedError = Hide-PasswordInText -Text $_.Exception.Message
-        Write-Host "Failed to deploy item: $MaskedError" -ForegroundColor Red
+        Write-Host "Failed to deploy item: $($_.Exception.Message)" -ForegroundColor Red
         throw
+    }
+}
+
+# ======================================================================
+# RDL REFERENCE MANAGEMENT FUNCTIONS
+# ======================================================================
+
+function Update-RdlReferences {
+    <#
+    .SYNOPSIS
+        Updates data source and dataset references in RDL files for SSRS deployment.
+    
+    .DESCRIPTION
+        Modifies RDL XML to update data source and dataset references from Visual Studio
+        development references to proper SSRS folder paths.
+    
+    .PARAMETER RdlContent
+        The RDL file content as XML.
+    
+    .PARAMETER DataSourceMappings
+        Hashtable mapping data source names to their SSRS paths.
+    
+    .PARAMETER DataSetMappings
+        Hashtable mapping dataset names to their SSRS paths.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [xml]$RdlContent,
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$DataSourceMappings = @{},
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$DataSetMappings = @{}
+    )
+    
+    try {
+        $Updated = $false
+        
+        # Define namespaces for RDL XML
+        $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($RdlContent.NameTable)
+        $NamespaceManager.AddNamespace("rd", "http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition")
+        $NamespaceManager.AddNamespace("rd2010", "http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition")
+        $NamespaceManager.AddNamespace("rd2005", "http://schemas.microsoft.com/sqlserver/reporting/2005/01/reportdefinition")
+        
+        # Try different namespace versions
+        $Namespaces = @("rd", "rd2010", "rd2005")
+        
+        foreach ($ns in $Namespaces) {
+            # Update Data Source References
+            $DataSourceNodes = $RdlContent.SelectNodes("//$ns`:DataSources/$ns`:DataSource/$ns`:DataSourceReference", $NamespaceManager)
+            foreach ($Node in $DataSourceNodes) {
+                $OriginalRef = $Node.InnerText
+                if ($DataSourceMappings.ContainsKey($OriginalRef)) {
+                    $NewRef = $DataSourceMappings[$OriginalRef]
+                    Write-Host "    Updating data source reference: '$OriginalRef' → '$NewRef'" -ForegroundColor Yellow
+                    $Node.InnerText = $NewRef
+                    $Updated = $true
+                }
+                elseif (-not $OriginalRef.StartsWith("/")) {
+                    # Auto-map to /Data Sources/ folder
+                    $NewRef = "/Data Sources/$OriginalRef"
+                    Write-Host "    Auto-mapping data source reference: '$OriginalRef' → '$NewRef'" -ForegroundColor Yellow
+                    $Node.InnerText = $NewRef
+                    $Updated = $true
+                }
+            }
+            
+            # Update Data Set References
+            $DataSetNodes = $RdlContent.SelectNodes("//$ns`:DataSets/$ns`:DataSet/$ns`:SharedDataSet/$ns`:SharedDataSetReference", $NamespaceManager)
+            foreach ($Node in $DataSetNodes) {
+                $OriginalRef = $Node.InnerText
+                if ($DataSetMappings.ContainsKey($OriginalRef)) {
+                    $NewRef = $DataSetMappings[$OriginalRef]
+                    Write-Host "    Updating dataset reference: '$OriginalRef' → '$NewRef'" -ForegroundColor Yellow
+                    $Node.InnerText = $NewRef
+                    $Updated = $true
+                }
+                elseif (-not $OriginalRef.StartsWith("/")) {
+                    # Auto-map to /DataSets/ folder
+                    $NewRef = "/DataSets/$OriginalRef"
+                    Write-Host "    Auto-mapping dataset reference: '$OriginalRef' → '$NewRef'" -ForegroundColor Yellow
+                    $Node.InnerText = $NewRef
+                    $Updated = $true
+                }
+            }
+            
+            # Update embedded data source connection references
+            $EmbeddedDataSourceNodes = $RdlContent.SelectNodes("//$ns`:DataSources/$ns`:DataSource[not($ns`:DataSourceReference)]", $NamespaceManager)
+            foreach ($Node in $EmbeddedDataSourceNodes) {
+                $DataSourceName = $Node.GetAttribute("Name")
+                if ($DataSourceMappings.ContainsKey($DataSourceName)) {
+                    Write-Host "    Converting embedded data source '$DataSourceName' to reference" -ForegroundColor Yellow
+                    
+                    # Remove existing content
+                    $Node.RemoveAll()
+                    
+                    # Add DataSourceReference
+                    $RefNode = $RdlContent.CreateElement("DataSourceReference", $Node.NamespaceURI)
+                    $RefNode.InnerText = $DataSourceMappings[$DataSourceName]
+                    $Node.AppendChild($RefNode)
+                    $Updated = $true
+                }
+            }
+        }
+        
+        return @{
+            Updated = $Updated
+            Content = $RdlContent
+        }
+    }
+    catch {
+        Write-Host "    [ERROR] Failed to update RDL references: $($_.Exception.Message)" -ForegroundColor Red
+        return @{
+            Updated = $false
+            Content = $RdlContent
+        }
+    }
+}
+
+function Get-RdlReferences {
+    <#
+    .SYNOPSIS
+        Analyzes RDL file to extract data source and dataset references.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [xml]$RdlContent
+    )
+    
+    $References = @{
+        DataSources = @()
+        DataSets = @()
+    }
+    
+    try {
+        $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($RdlContent.NameTable)
+        $NamespaceManager.AddNamespace("rd", "http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition")
+        $NamespaceManager.AddNamespace("rd2010", "http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition")
+        $NamespaceManager.AddNamespace("rd2005", "http://schemas.microsoft.com/sqlserver/reporting/2005/01/reportdefinition")
+        
+        $Namespaces = @("rd", "rd2010", "rd2005")
+        
+        foreach ($ns in $Namespaces) {
+            # Get data source references
+            $DataSourceNodes = $RdlContent.SelectNodes("//$ns`:DataSources/$ns`:DataSource", $NamespaceManager)
+            foreach ($Node in $DataSourceNodes) {
+                $DataSourceName = $Node.GetAttribute("Name")
+                $RefNode = $Node.SelectSingleNode("$ns`:DataSourceReference", $NamespaceManager)
+                if ($RefNode) {
+                    $References.DataSources += @{
+                        Name = $DataSourceName
+                        Reference = $RefNode.InnerText
+                        Type = "Reference"
+                    }
+                } else {
+                    $References.DataSources += @{
+                        Name = $DataSourceName
+                        Reference = $null
+                        Type = "Embedded"
+                    }
+                }
+            }
+            
+            # Get dataset references
+            $DataSetNodes = $RdlContent.SelectNodes("//$ns`:DataSets/$ns`:DataSet", $NamespaceManager)
+            foreach ($Node in $DataSetNodes) {
+                $DataSetName = $Node.GetAttribute("Name")
+                $RefNode = $Node.SelectSingleNode("$ns`:SharedDataSet/$ns`:SharedDataSetReference", $NamespaceManager)
+                if ($RefNode) {
+                    $References.DataSets += @{
+                        Name = $DataSetName
+                        Reference = $RefNode.InnerText
+                        Type = "Shared"
+                    }
+                } else {
+                    $References.DataSets += @{
+                        Name = $DataSetName
+                        Reference = $null
+                        Type = "Embedded"
+                    }
+                }
+            }
+        }
+        
+        return $References
+    }
+    catch {
+        Write-Host "    [ERROR] Failed to analyze RDL references: $($_.Exception.Message)" -ForegroundColor Red
+        return $References
+    }
+}
+
+# ======================================================================
+# RSD REFERENCE MANAGEMENT FUNCTIONS
+# ======================================================================
+
+function Update-RsdReferences {
+    <#
+    .SYNOPSIS
+        Updates data source references in RSD (shared dataset) files for SSRS deployment.
+    
+    .PARAMETER RsdContent
+        The XML content of the RSD file.
+    
+    .PARAMETER DataSourceMappings
+        Hashtable mapping data source names to full SSRS paths.
+    
+    .PARAMETER DataSetName
+        The expected name for the internal dataset (should match the RSD file name).
+    
+    .RETURNS
+        PSObject with Updated (bool) and Content (XmlDocument) properties.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [xml]$RsdContent,
+        
+        [Parameter(Mandatory = $true)]
+        [hashtable]$DataSourceMappings,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$DataSetName
+    )
+    
+    $Updated = $false
+    $UpdatedContent = $RsdContent.Clone()
+    
+    try {
+        # Handle different namespace versions
+        $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($UpdatedContent.NameTable)
+        
+        # Try different namespace URIs for different SSRS versions
+        $PossibleNamespaces = @(
+            "http://schemas.microsoft.com/sqlserver/reporting/2010/01/shareddatasetdefinition",
+            "http://schemas.microsoft.com/sqlserver/reporting/2016/01/shareddatasetdefinition"
+        )
+        
+        $DefaultNamespace = $null
+        foreach ($ns in $PossibleNamespaces) {
+            if ($UpdatedContent.DocumentElement.NamespaceURI -eq $ns) {
+                $DefaultNamespace = $ns
+                break
+            }
+        }
+        
+        if (-not $DefaultNamespace) {
+            $DefaultNamespace = $UpdatedContent.DocumentElement.NamespaceURI
+        }
+        
+        $NamespaceManager.AddNamespace("rsd", $DefaultNamespace)
+        
+        # Find DataSourceReference elements
+        $DataSourceRefNodes = $UpdatedContent.SelectNodes("//rsd:DataSourceReference", $NamespaceManager)
+        
+        foreach ($Node in $DataSourceRefNodes) {
+            $CurrentRef = $Node.InnerText
+            
+            # Skip if already a full path
+            if ($CurrentRef.StartsWith("/")) {
+                continue
+            }
+            
+            # Check if we have a mapping for this data source
+            if ($DataSourceMappings.ContainsKey($CurrentRef)) {
+                $NewRef = $DataSourceMappings[$CurrentRef]
+                Write-Host "    Updating data source reference: '$CurrentRef' → '$NewRef'" -ForegroundColor Cyan
+                $Node.InnerText = $NewRef
+                $Updated = $true
+            }
+        }
+        
+        # Update internal dataset name if provided
+        if ($DataSetName) {
+            $DataSetNodes = $UpdatedContent.SelectNodes("//rsd:DataSet", $NamespaceManager)
+            foreach ($Node in $DataSetNodes) {
+                $CurrentName = $Node.GetAttribute("Name")
+                if ($CurrentName -and $CurrentName -ne $DataSetName) {
+                    Write-Host "    Updating internal dataset name: '$CurrentName' → '$DataSetName'" -ForegroundColor Cyan
+                    $Node.SetAttribute("Name", $DataSetName)
+                    $Updated = $true
+                }
+            }
+        }
+        
+        # If updated, create a new XML document with proper formatting
+        if ($Updated) {
+            # Create XML writer settings to preserve formatting
+            $StringWriter = New-Object System.IO.StringWriter
+            $XmlWriterSettings = New-Object System.Xml.XmlWriterSettings
+            $XmlWriterSettings.Indent = $true
+            $XmlWriterSettings.IndentChars = "  "
+            $XmlWriterSettings.NewLineChars = "`r`n"
+            $XmlWriterSettings.Encoding = [System.Text.Encoding]::UTF8
+            
+            $XmlWriter = [System.Xml.XmlWriter]::Create($StringWriter, $XmlWriterSettings)
+            $UpdatedContent.WriteTo($XmlWriter)
+            $XmlWriter.Close()
+            
+            # Create new XML document from formatted string
+            $FormattedXml = New-Object System.Xml.XmlDocument
+            $FormattedXml.LoadXml($StringWriter.ToString())
+            $StringWriter.Close()
+            
+            return @{
+                Updated = $Updated
+                Content = $FormattedXml
+            }
+        }
+        
+        return @{
+            Updated = $Updated
+            Content = $UpdatedContent
+        }
+    }
+    catch {
+        Write-Warning "Error updating RSD references: $($_.Exception.Message)"
+        return @{
+            Updated = $false
+            Content = $RsdContent
+        }
+    }
+}
+
+function Get-RsdReferences {
+    <#
+    .SYNOPSIS
+        Analyzes an RSD file to extract data source references.
+    
+    .PARAMETER RsdContent
+        The XML content of the RSD file.
+    
+    .RETURNS
+        PSObject with DataSources array property.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [xml]$RsdContent
+    )
+    
+    $DataSources = @()
+    
+    try {
+        # Handle different namespace versions
+        $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($RsdContent.NameTable)
+        
+        # Try different namespace URIs for different SSRS versions
+        $PossibleNamespaces = @(
+            "http://schemas.microsoft.com/sqlserver/reporting/2010/01/shareddatasetdefinition",
+            "http://schemas.microsoft.com/sqlserver/reporting/2016/01/shareddatasetdefinition"
+        )
+        
+        $DefaultNamespace = $null
+        foreach ($ns in $PossibleNamespaces) {
+            if ($RsdContent.DocumentElement.NamespaceURI -eq $ns) {
+                $DefaultNamespace = $ns
+                break
+            }
+        }
+        
+        if (-not $DefaultNamespace) {
+            $DefaultNamespace = $RsdContent.DocumentElement.NamespaceURI
+        }
+        
+        $NamespaceManager.AddNamespace("rsd", $DefaultNamespace)
+        
+        # Find DataSourceReference elements
+        $DataSourceRefNodes = $RsdContent.SelectNodes("//rsd:DataSourceReference", $NamespaceManager)
+        
+        foreach ($Node in $DataSourceRefNodes) {
+            $Reference = $Node.InnerText
+            $DataSources += @{
+                Name = $Reference
+                Reference = $Reference
+                Type = "Reference"
+            }
+        }
+        
+        return @{
+            DataSources = $DataSources
+        }
+    }
+    catch {
+        Write-Warning "Error analyzing RSD references: $($_.Exception.Message)"
+        return @{
+            DataSources = @()
+        }
     }
 }
 
@@ -490,8 +848,7 @@ function Get-SSRSServerInfo {
         return $ServerInfo
     }
     catch {
-        $MaskedError = Hide-PasswordInText -Text $_.Exception.Message
-        Write-Host "Failed to get server info: $MaskedError" -ForegroundColor Red
+        Write-Host "Failed to get server info: $($_.Exception.Message)" -ForegroundColor Red
         throw
     }
 }

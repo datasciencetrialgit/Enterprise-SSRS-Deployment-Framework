@@ -20,13 +20,12 @@ A comprehensive PowerShell-based deployment solution for SQL Server Reporting Se
 SSRS-Deployment-Package/
 ├── Deploy-SSRS.ps1                 # Main deployment script
 ├── SSRS-Core-Functions.ps1         # Core SSRS web service functions
-├── SSRS-Helper-Functions.ps1       # Individual deployment helper functions
 ├── Setup-Package.ps1               # Package setup and verification script
 ├── Deploy/                         # Deployment content folder
 │   ├── Config/
 │   │   └── deployment-config.json  # Configuration file
 │   ├── RDL-Files/                  # Place your .rdl report files here
-│   ├── DataSources/                # Place your .rds data source files here
+│   ├── Data Sources/               # Place your .rds data source files here
 │   └── DataSets/                   # Place your .rsd dataset files here
 └── Logs/                          # Deployment logs (auto-created)
 ```
@@ -49,7 +48,7 @@ SSRS-Deployment-Package/
    ```
 3. Copy your SSRS files to the appropriate folders:
    - `.rdl` files → `Deploy/RDL-Files/`
-   - `.rds` data source files → `Deploy/DataSources/`
+   - `.rds` data source files → `Deploy/Data Sources/`
    - `.rsd` dataset files → `Deploy/DataSets/`
 
 ### 3. Authentication
@@ -86,21 +85,102 @@ Edit `Deploy/Config/deployment-config.json` to match your environment:
 ### 5. Deploy
 
 ```powershell
-# Full deployment
+# Simplified deployment - only environment and credentials needed
+# (ReportServerUrl and TargetFolder read from config file)
+.\Deploy-SSRS.ps1 -Environment "Dev" -User "domain\username" -Password "yourpassword"
+
+# Full deployment with explicit parameters (overrides config)
 .\Deploy-SSRS.ps1 -ReportServerUrl "http://localhost/ReportServer" -TargetFolder "/MyReports" -Environment "Dev"
 
 # Test deployment (WhatIf mode)
-.\Deploy-SSRS.ps1 -ReportServerUrl "http://localhost/ReportServer" -TargetFolder "/MyReports" -Environment "Dev" -WhatIf
+.\Deploy-SSRS.ps1 -Environment "Dev" -User "domain\username" -Password "yourpassword" -WhatIf
 
-# Deploy with username and password  
-.\Deploy-SSRS.ps1 -Environment "Dev" -User "your-username@domain.com" -Password "YourPassword"
+# Deploy with configuration file only (uses current user authentication)
+.\Deploy-SSRS.ps1 -Environment "Dev"
 
-# Deploy with credentials
+# Deploy with credentials object
 $Cred = Get-Credential
-.\Deploy-SSRS.ps1 -ReportServerUrl "http://localhost/ReportServer" -TargetFolder "/MyReports" -Environment "Dev" -Credential $Cred
+.\Deploy-SSRS.ps1 -Environment "Dev" -Credential $Cred
 
 # Deploy with credential prompt
-.\Deploy-SSRS.ps1 -ReportServerUrl "http://localhost/ReportServer" -Environment "Dev" -PromptForCredentials
+.\Deploy-SSRS.ps1 -Environment "Dev" -PromptForCredentials
+```
+
+## 🚀 GitHub Actions & CI/CD Integration
+
+This package is designed to work seamlessly with GitHub Actions and other CI/CD pipelines. The `-User` and `-Password` parameters allow for automated deployments without interactive prompts.
+
+### GitHub Actions Example
+
+Create `.github/workflows/deploy-ssrs.yml`:
+
+```yaml
+name: Deploy SSRS Reports
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Deploy to Dev Environment
+      run: |
+        .\Deploy-SSRS.ps1 -Environment "Dev" -User "${{ secrets.SSRS_USERNAME }}" -Password "${{ secrets.SSRS_PASSWORD }}"
+      shell: powershell
+      
+    - name: Deploy to Production (on main branch)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        .\Deploy-SSRS.ps1 -Environment "Prod" -User "${{ secrets.PROD_SSRS_USERNAME }}" -Password "${{ secrets.PROD_SSRS_PASSWORD }}"
+      shell: powershell
+```
+
+### Required GitHub Secrets
+
+Set these secrets in your GitHub repository (Settings → Secrets and Variables → Actions):
+
+| Secret Name | Description | Example |
+|-------------|-------------|---------|
+| `SSRS_USERNAME` | SSRS service account username | `domain\svc-ssrs` |
+| `SSRS_PASSWORD` | SSRS service account password | `your-secure-password` |
+| `PROD_SSRS_USERNAME` | Production SSRS username | `domain\svc-ssrs-prod` |
+| `PROD_SSRS_PASSWORD` | Production SSRS password | `your-prod-password` |
+
+**Note**: ReportServerUrl and TargetFolder are automatically read from `Config/deployment-config.json` based on the Environment parameter.
+
+### Azure DevOps Pipeline Example
+
+```yaml
+trigger:
+- main
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+- group: SSRS-Variables  # Variable group containing SSRS credentials
+
+steps:
+- task: PowerShell@2
+  displayName: 'Deploy SSRS Reports'
+  inputs:
+    targetType: 'inline'
+    script: |
+      .\Deploy-SSRS.ps1 -Environment "$(Environment)" -User "$(SSRS_USERNAME)" -Password "$(SSRS_PASSWORD)"
+```
+
+### Security Best Practices for CI/CD
+
+1. **Use Service Accounts**: Create dedicated service accounts for SSRS deployments
+2. **Encrypt Secrets**: Always store credentials as encrypted secrets in your CI/CD platform
+3. **Least Privilege**: Grant only necessary permissions to service accounts
+4. **Environment Separation**: Use different credentials for different environments
+5. **Audit Logging**: Enable audit logging in SSRS to track deployment activities
 ```
 
 ## 📖 Usage Examples
@@ -115,25 +195,33 @@ $Cred = Get-Credential
 ### Individual Component Deployment
 
 ```powershell
-# Import helper functions
-. .\SSRS-Helper-Functions.ps1
+# Import core functions
+. .\SSRS-Core-Functions.ps1
+
+# Connect to SSRS server
+Connect-RsReportServer -ReportServerUri "http://localhost/ReportServer"
 
 # Deploy a single report
-Deploy-SingleReport -ReportPath "Deploy/RDL-Files/SalesReport.rdl" -ReportServerUrl "http://localhost/ReportServer" -TargetFolder "/Reports" -Overwrite
+New-SSRSFolder -FolderPath "/Reports"
+Write-RsCatalogItem -Path "Deploy/RDL-Files/SalesReport.rdl" -RsFolder "/Reports" -Overwrite
 
 # Deploy a single data source
-Deploy-SingleDataSource -DataSourceName "AdventureWorks" -ConnectionString "Data Source=localhost;Initial Catalog=AdventureWorks2019;Integrated Security=True" -ReportServerUrl "http://localhost/ReportServer"
+New-SSRSFolder -FolderPath "/Data Sources"
+New-RsDataSource -Name "AdventureWorks" -ConnectionString "Data Source=localhost;Initial Catalog=AdventureWorks2019;Integrated Security=True" -RsFolder "/Data Sources" -Overwrite
 
 # Deploy all files from a specific folder
-Deploy-FromFolder -SourceFolder "Deploy/RDL-Files" -FileExtension "*.rdl" -ReportServerUrl "http://localhost/ReportServer" -TargetFolder "/Reports" -Overwrite
+Get-ChildItem "Deploy/RDL-Files/*.rdl" | ForEach-Object { 
+    Write-RsCatalogItem -Path $_.FullName -RsFolder "/Reports" -Overwrite 
+}
 ```
 
 ### Inventory and Validation
 
 ```powershell
 # Get SSRS server inventory
-. .\SSRS-Helper-Functions.ps1
-Get-SSRSInventory -ReportServerUrl "http://localhost/ReportServer" -RootFolder "/"
+. .\SSRS-Core-Functions.ps1
+Connect-RsReportServer -ReportServerUri "http://localhost/ReportServer"
+Get-RsFolderContent -RsFolder "/" -Recurse
 ```
 
 ## 🔧 Configuration Options

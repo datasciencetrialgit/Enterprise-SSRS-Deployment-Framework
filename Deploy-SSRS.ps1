@@ -32,17 +32,39 @@
 .PARAMETER ConfigFile
     Path to the deployment configuration file
 
-.EXAMPLE
-    .\Deploy-SSRS.ps1
-    Deploys using configuration values for Dev environment
+.PARAMETER Credential
+    PSCredential object for SSRS authentication
+
+.PARAMETER User
+    Username for SSRS authentication (use with Password parameter for CI/CD scenarios)
+
+.PARAMETER Password
+    Password for SSRS authentication (use with User parameter for CI/CD scenarios)
+
+.PARAMETER PromptForCredentials
+    Switch to prompt for credentials interactively
+
+.PARAMETER Force
+    Force deployment ignoring warnings
+
+.PARAMETER WhatIf
+    Test deployment without making actual changes
 
 .EXAMPLE
-    .\Deploy-SSRS.ps1 -Environment "Prod"
-    Deploys using configuration values for Prod environment
+    .\Deploy-SSRS.ps1 -Environment "Dev"
+    Deploys using configuration values for Dev environment with current user authentication
+
+.EXAMPLE
+    .\Deploy-SSRS.ps1 -Environment "Prod" -User "domain\username" -Password "password"
+    Deploys to Prod environment with username/password (ideal for CI/CD and GitHub Actions)
 
 .EXAMPLE
     .\Deploy-SSRS.ps1 -ReportServerUrl "http://localhost/ReportServer" -TargetFolder "/MyReports" -Environment "Dev"
     Deploys with explicit parameters, overriding configuration values
+
+.EXAMPLE
+    .\Deploy-SSRS.ps1 -Environment "Dev" -User "domain\username" -Password "password" -WhatIf
+    Test deployment without making changes
 
 .NOTES
     Author: SSRS Deployment Tool
@@ -71,7 +93,7 @@ param(
     [string]$User,
     
     [Parameter(Mandatory = $false)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '', Justification = 'Backward compatibility - password is masked in logs')]
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '', Justification = 'Backward compatibility')]
     [string]$Password,
     
     [Parameter(Mandatory = $false)]
@@ -112,42 +134,6 @@ if (Test-Path $SSRSCorePath) {
 # LOGGING FUNCTIONS
 # ======================================================================
 
-function Hide-PasswordInText {
-    <#
-    .SYNOPSIS
-        Masks potential passwords in text to prevent them from appearing in logs or console output.
-    
-    .PARAMETER Text
-        The text to mask passwords in.
-    #>
-    param(
-        [string]$Text
-    )
-    
-    if ([string]::IsNullOrEmpty($Text)) {
-        return $Text
-    }
-    
-    # Mask various password patterns
-    $MaskedText = $Text
-    
-    # Mask specific known test passwords (add test passwords here, not real ones)
-    $MaskedText = $MaskedText -replace "TestPassword123", "*****"
-    
-    # Mask command-line password parameters
-    $MaskedText = $MaskedText -replace "-Password\s+\S+", "-Password *****"
-    $MaskedText = $MaskedText -replace "-Password\s+\S+", "-Password *****"
-    
-    # Mask common password patterns in XML/connection strings
-    $MaskedText = $MaskedText -replace "password\s*=\s*[^;\s]+", "password=*****" -replace "pwd\s*=\s*[^;\s]+", "pwd=*****"
-    
-    # Mask authentication tokens or other sensitive patterns
-    $MaskedText = $MaskedText -replace "(?i)(password|pwd|token|secret|key)\s*[:=]\s*[^\s;,]+", "`$1=*****"
-    
-    return $MaskedText
-}
-
-# Add password masking for error logging
 function Write-Log {
     param(
         [string]$Message,
@@ -155,11 +141,8 @@ function Write-Log {
         [string]$Level = "INFO"
     )
     
-    # Mask any potential passwords in log messages
-    $SafeMessage = Hide-PasswordInText -Text $Message
-    
     $TimeStamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $LogMessage = "[$TimeStamp] [$Level] $SafeMessage"
+    $LogMessage = "[$TimeStamp] [$Level] $Message"
     
     # Color coding for console output
     switch ($Level) {
@@ -225,7 +208,11 @@ function New-DefaultConfig {
         }
         Deployment = @{
             CreateFolders = $true
-            OverwriteExisting = $true
+            OverwriteExisting = @{
+                DataSources = $true
+                DataSets = $true
+                Reports = $true
+            }
             CreateDataSources = $true
             CreateDataSets = $true
             CreateReports = $true
@@ -234,6 +221,28 @@ function New-DefaultConfig {
             Reports = "/Reports"
             DataSources = "/Data Sources"
             DataSets = "/DataSets"
+        }
+        Security = @{
+            Authentication = @{
+                UseCurrentUser = $true
+                PromptForCredentials = $false
+                Domain = ""
+                Username = ""
+            }
+        }
+        Environments = @{
+            Dev = @{
+                ReportServerUrl = "http://localhost/ReportServer"
+                ReportManagerUrl = "http://localhost/Reports"
+            }
+            Test = @{
+                ReportServerUrl = "http://testserver/ReportServer"
+                ReportManagerUrl = "http://testserver/Reports"
+            }
+            Prod = @{
+                ReportServerUrl = "http://prodserver/ReportServer"
+                ReportManagerUrl = "http://prodserver/Reports"
+            }
         }
     }
     
@@ -299,16 +308,18 @@ function Publish-DataSources {
         return
     }
     
+    # Create data sources folder
+    $DataSourcesFolder = "/Data Sources"
+    if ($Config.Deployment.CreateFolders) {
+        New-SSRSFolder -FolderPath $DataSourcesFolder
+    }
+    
+    # Deploy .rds files by parsing them and creating data sources programmatically
     $DataSourceFiles = Get-ChildItem -Path $DataSourcesPath -Filter "*.rds" -ErrorAction SilentlyContinue
     
     if ($DataSourceFiles.Count -eq 0) {
         Write-Log "No data source files found in: $DataSourcesPath" -Level "INFO"
         return
-    }
-    
-    # Create data sources folder
-    if ($Config.Deployment.CreateFolders) {
-        New-SSRSFolder -FolderPath "/Data Sources"
     }
     
     foreach ($DataSourceFile in $DataSourceFiles) {
@@ -320,10 +331,34 @@ function Publish-DataSources {
                 continue
             }
             
-            # Deploy the data source file
-            Write-RsCatalogItem -Path $DataSourceFile.FullName -RsFolder "/Data Sources" -Overwrite:$Config.Deployment.OverwriteExisting
+            # Parse the RDS file to extract connection information
+            [xml]$RdsContent = Get-Content $DataSourceFile.FullName
+            $DataSourceName = $RdsContent.RptDataSource.Name
+            $Extension = $RdsContent.RptDataSource.ConnectionProperties.Extension
             
-            Write-Log "Successfully deployed data source: $($DataSourceFile.Name)" -Level "SUCCESS"
+            # Use connection string from config if available, otherwise use the one from file
+            $ConnectionString = if ($Config.DataSources.DefaultConnectionStrings.$Environment) {
+                $Config.DataSources.DefaultConnectionStrings.$Environment
+            } else {
+                $RdsContent.RptDataSource.ConnectionProperties.ConnectString
+            }
+            
+            # Determine credential retrieval method
+            $CredentialRetrieval = if ($RdsContent.RptDataSource.ConnectionProperties.IntegratedSecurity -eq "true") {
+                "Integrated"
+            } else {
+                $Config.DataSources.CredentialRetrieval
+            }
+            
+            # Create the data source using the programmatic method
+            $DeployResult = New-RsDataSource -Name $DataSourceName -RsFolder $DataSourcesFolder -Extension $Extension -ConnectionString $ConnectionString -CredentialRetrieval $CredentialRetrieval -Overwrite:$Config.Deployment.OverwriteExisting.DataSources
+            
+            # Check if item was skipped or deployed
+            if ($DeployResult.WasSkipped) {
+                Write-Log "Skipped existing data source: $DataSourceName (OverwriteExisting.DataSources = false)" -Level "INFO"
+            } else {
+                Write-Log "Successfully deployed data source: $DataSourceName" -Level "SUCCESS"
+            }
         }
         catch {
             Write-Log "Failed to deploy data source $($DataSourceFile.Name): $($_.Exception.Message)" -Level "ERROR"
@@ -356,24 +391,92 @@ function Publish-DataSets {
         return
     }
     
+    # Create data source mappings from deployed data sources
+    $DataSourceMappings = @{}
+    $DataSourcePath = Join-Path (Split-Path $DataSetsPath -Parent) "Data Sources"
+    if (Test-Path $DataSourcePath) {
+        $DataSourceFiles = Get-ChildItem -Path $DataSourcePath -Filter "*.rds" -ErrorAction SilentlyContinue
+        foreach ($File in $DataSourceFiles) {
+            $BaseName = [System.IO.Path]::GetFileNameWithoutExtension($File.Name)
+            $DataSourceMappings[$BaseName] = "/Data Sources/$BaseName"
+        }
+        Write-Log "Created data source mappings for $($DataSourceMappings.Count) data sources" -Level "INFO"
+    }
+    
     # Create data sets folder
+    $DataSetsFolder = "/DataSets"
     if ($Config.Deployment.CreateFolders) {
-        New-SSRSFolder -FolderPath "/DataSets"
+        New-SSRSFolder -FolderPath $DataSetsFolder
     }
     
     foreach ($DataSetFile in $DataSetFiles) {
         try {
+            $DataSetName = [System.IO.Path]::GetFileNameWithoutExtension($DataSetFile.Name)
             Write-Log "Deploying data set: $($DataSetFile.Name)" -Level "INFO"
+            
+            # Read and analyze RSD content
+            [xml]$RsdContent = Get-Content -Path $DataSetFile.FullName -Raw
+            
+            # Analyze current references
+            $References = Get-RsdReferences -RsdContent $RsdContent
+            
+            if ($References.DataSources.Count -gt 0) {
+                Write-Log "  Current references:" -Level "INFO"
+                foreach ($DataSource in $References.DataSources) {
+                    Write-Log "    Data Source: $($DataSource.Name) ($($DataSource.Type)) → $($DataSource.Reference)" -Level "INFO"
+                }
+            }
+            
+            # Update references
+            $UpdateResult = Update-RsdReferences -RsdContent $RsdContent -DataSourceMappings $DataSourceMappings -DataSetName $DataSetName
+            
+            if ($UpdateResult.Updated) {
+                Write-Log "  Updated references in RSD file" -Level "INFO"
+                
+                # Save updated content to temporary file with proper encoding
+                $TempFile = [System.IO.Path]::GetTempFileName()
+                $TempRsdFile = [System.IO.Path]::ChangeExtension($TempFile, ".rsd")
+                Remove-Item -Path $TempFile -Force -ErrorAction SilentlyContinue
+                
+                # Create XML writer settings to preserve proper format
+                $XmlWriterSettings = New-Object System.Xml.XmlWriterSettings
+                $XmlWriterSettings.Indent = $true
+                $XmlWriterSettings.IndentChars = "  "
+                $XmlWriterSettings.Encoding = [System.Text.Encoding]::UTF8
+                $XmlWriterSettings.OmitXmlDeclaration = $false
+                
+                $XmlWriter = [System.Xml.XmlWriter]::Create($TempRsdFile, $XmlWriterSettings)
+                $UpdateResult.Content.WriteTo($XmlWriter)
+                $XmlWriter.Close()
+                
+                $UpdatedRsdPath = $TempRsdFile
+            } else {
+                Write-Log "  No reference updates needed" -Level "INFO"
+                $UpdatedRsdPath = $DataSetFile.FullName
+            }
             
             if ($WhatIf) {
                 Write-Log "WhatIf: Would deploy data set $($DataSetFile.Name)" -Level "INFO"
+                if ($UpdateResult.Updated) {
+                    Remove-Item -Path $TempRsdFile -Force -ErrorAction SilentlyContinue
+                }
                 continue
             }
             
-            # Deploy the data set file
-            Write-RsCatalogItem -Path $DataSetFile.FullName -RsFolder "/DataSets" -Overwrite:$Config.Deployment.OverwriteExisting
+            # Deploy the data set file with updated references
+            $DeployResult = Write-RsCatalogItem -Path $UpdatedRsdPath -RsFolder $DataSetsFolder -Name $DataSetName -Overwrite:$Config.Deployment.OverwriteExisting.DataSets
             
-            Write-Log "Successfully deployed data set: $($DataSetFile.Name)" -Level "SUCCESS"
+            # Clean up temporary file if created
+            if ($UpdateResult.Updated) {
+                Remove-Item -Path $TempRsdFile -Force -ErrorAction SilentlyContinue
+            }
+            
+            # Check if item was skipped or deployed
+            if ($DeployResult.WasSkipped) {
+                Write-Log "Skipped existing data set: $($DataSetFile.Name) (OverwriteExisting.DataSets = false)" -Level "INFO"
+            } else {
+                Write-Log "Successfully deployed data set: $($DataSetFile.Name)" -Level "SUCCESS"
+            }
         }
         catch {
             Write-Log "Failed to deploy data set $($DataSetFile.Name): $($_.Exception.Message)" -Level "ERROR"
@@ -407,37 +510,140 @@ function Publish-Reports {
         return
     }
     
-    # Create target folder
-    if ($Config.Deployment.CreateFolders) {
-        New-SSRSFolder -FolderPath $TargetFolder
+    Write-Log "Found $($ReportFiles.Count) RDL files to process" -Level "INFO"
+    
+    # Create reference mappings based on available data sources and datasets
+    $DataSourceMappings = @{}
+    $DataSetMappings = @{}
+    
+    # Build mappings from available files
+    $DataSourcePath = Join-Path $ScriptPath "Deploy\Data Sources"
+    if (Test-Path $DataSourcePath) {
+        $DataSourceFiles = Get-ChildItem -Path $DataSourcePath -Filter "*.rds"
+        foreach ($File in $DataSourceFiles) {
+            $BaseName = [System.IO.Path]::GetFileNameWithoutExtension($File.Name)
+            $DataSourceMappings[$BaseName] = "/Data Sources/$BaseName"
+        }
+        Write-Log "Created data source mappings for $($DataSourceMappings.Count) data sources" -Level "INFO"
+    }
+    
+    $DataSetPath = Join-Path $ScriptPath "Deploy\DataSets"
+    if (Test-Path $DataSetPath) {
+        $DataSetFiles = Get-ChildItem -Path $DataSetPath -Filter "*.rsd"
+        foreach ($File in $DataSetFiles) {
+            $BaseName = [System.IO.Path]::GetFileNameWithoutExtension($File.Name)
+            $DataSetMappings[$BaseName] = "/DataSets/$BaseName"
+        }
+        Write-Log "Created dataset mappings for $($DataSetMappings.Count) datasets" -Level "INFO"
+    }
+
+    # Use root folder if target folder is root
+    $ResolvedTargetFolder = if ($TargetFolder -eq "/") {
+        ""  # Empty string for root deployment
+    } else {
+        $TargetFolder
+    }
+    
+    # Create target folder (only if not root)
+    if ($Config.Deployment.CreateFolders -and $ResolvedTargetFolder -ne "/" -and $ResolvedTargetFolder) {
+        New-SSRSFolder -FolderPath $ResolvedTargetFolder
     }
     
     foreach ($ReportFile in $ReportFiles) {
         try {
+            $ReportName = [System.IO.Path]::GetFileNameWithoutExtension($ReportFile.Name)
             Write-Log "Deploying report: $($ReportFile.Name)" -Level "INFO"
+            
+            # Read and analyze RDL content
+            [xml]$RdlContent = Get-Content -Path $ReportFile.FullName -Raw
+            
+            # Analyze current references
+            $References = Get-RdlReferences -RdlContent $RdlContent
+            
+            if ($References.DataSources.Count -gt 0 -or $References.DataSets.Count -gt 0) {
+                Write-Log "  Current references:" -Level "INFO"
+                foreach ($DataSource in $References.DataSources) {
+                    Write-Log "    Data Source: $($DataSource.Name) ($($DataSource.Type)) → $($DataSource.Reference)" -Level "INFO"
+                }
+                foreach ($DataSet in $References.DataSets) {
+                    Write-Log "    Dataset: $($DataSet.Name) ($($DataSet.Type)) → $($DataSet.Reference)" -Level "INFO"
+                }
+            }
+            
+            # Update references
+            $UpdateResult = Update-RdlReferences -RdlContent $RdlContent -DataSourceMappings $DataSourceMappings -DataSetMappings $DataSetMappings
+            
+            if ($UpdateResult.Updated) {
+                Write-Log "  Updated references in RDL file" -Level "INFO"
+                
+                # Save updated content to temporary file with proper encoding
+                $TempFile = [System.IO.Path]::GetTempFileName()
+                $TempRdlFile = [System.IO.Path]::ChangeExtension($TempFile, ".rdl")
+                Remove-Item -Path $TempFile -Force -ErrorAction SilentlyContinue
+                
+                # Create XML writer settings to preserve proper format
+                $XmlWriterSettings = New-Object System.Xml.XmlWriterSettings
+                $XmlWriterSettings.Indent = $true
+                $XmlWriterSettings.IndentChars = "  "
+                $XmlWriterSettings.Encoding = [System.Text.Encoding]::UTF8
+                $XmlWriterSettings.OmitXmlDeclaration = $false
+                
+                $XmlWriter = [System.Xml.XmlWriter]::Create($TempRdlFile, $XmlWriterSettings)
+                $UpdateResult.Content.WriteTo($XmlWriter)
+                $XmlWriter.Close()
+                
+                $UpdatedRdlPath = $TempRdlFile
+            } else {
+                Write-Log "  No reference updates needed" -Level "INFO"
+                $UpdatedRdlPath = $ReportFile.FullName
+            }
             
             if ($WhatIf) {
                 Write-Log "WhatIf: Would deploy report $($ReportFile.Name)" -Level "INFO"
+                if ($UpdateResult.Updated) {
+                    Remove-Item -Path $TempRdlFile -Force -ErrorAction SilentlyContinue
+                }
                 continue
             }
             
-            # Determine target folder based on directory structure
-            $RelativePath = $ReportFile.DirectoryName.Replace($ReportsPath, "").Replace("\", "/")
-            $ReportTargetFolder = if ($RelativePath) { 
-                "$TargetFolder$RelativePath" 
-            } else { 
-                $TargetFolder 
+            # Determine target folder based on directory structure, preserving the folder hierarchy
+            $RelativePath = $ReportFile.DirectoryName.Replace($ReportsPath, "").TrimStart('\').Replace('\', '/')
+            
+            if ($RelativePath) {
+                $ReportTargetFolder = if ($ResolvedTargetFolder) { 
+                    "$ResolvedTargetFolder/$RelativePath" 
+                } else { 
+                    "/$RelativePath" 
+                }
+                Write-Log "Preserving folder structure: $($ReportFile.Name) -> $ReportTargetFolder" -Level "INFO"
+            } else {
+                $ReportTargetFolder = if ($ResolvedTargetFolder) { 
+                    $ResolvedTargetFolder 
+                } else { 
+                    "/" 
+                }
             }
             
-            # Create subfolder if needed
-            if ($RelativePath) {
+            # Create subfolder hierarchy if needed (skip if deploying to root)
+            if ($RelativePath -and $Config.Deployment.CreateFolders -and $ReportTargetFolder -ne "/") {
+                Write-Log "Creating folder hierarchy: $ReportTargetFolder" -Level "INFO"
                 New-SSRSFolder -FolderPath $ReportTargetFolder
             }
             
-            # Deploy the report
-            Write-RsCatalogItem -Path $ReportFile.FullName -RsFolder $ReportTargetFolder -Overwrite:$Config.Deployment.OverwriteExisting
+            # Deploy the report with updated references
+            $DeployResult = Write-RsCatalogItem -Path $UpdatedRdlPath -RsFolder $ReportTargetFolder -Name $ReportName -Overwrite:$Config.Deployment.OverwriteExisting.Reports
             
-            Write-Log "Successfully deployed report: $($ReportFile.Name)" -Level "SUCCESS"
+            # Clean up temporary file if created
+            if ($UpdateResult.Updated) {
+                Remove-Item -Path $TempRdlFile -Force -ErrorAction SilentlyContinue
+            }
+            
+            # Check if item was skipped or deployed
+            if ($DeployResult.WasSkipped) {
+                Write-Log "Skipped existing report: $($ReportFile.Name) (OverwriteExisting.Reports = false)" -Level "INFO"
+            } else {
+                Write-Log "Successfully deployed report: $($ReportFile.Name)" -Level "SUCCESS"
+            }
         }
         catch {
             Write-Log "Failed to deploy report $($ReportFile.Name): $($_.Exception.Message)" -Level "ERROR"
@@ -462,9 +668,19 @@ function Test-DeploymentIntegrity {
         Write-Log "Deployment validation results:" -Level "INFO"
         Write-Log "Total items deployed: $($DeployedItems.Count)" -Level "INFO"
         
+        # Show items by type
         $ItemTypes = $DeployedItems | Group-Object TypeName
         foreach ($ItemType in $ItemTypes) {
             Write-Log "  $($ItemType.Name): $($ItemType.Count) items" -Level "INFO"
+        }
+        
+        # Show folder structure for reports
+        $Reports = $DeployedItems | Where-Object { $_.TypeName -eq "Report" }
+        if ($Reports) {
+            Write-Log "Report folder structure:" -Level "INFO"
+            foreach ($Report in $Reports) {
+                Write-Log "  $($Report.Path)" -Level "INFO"
+            }
         }
         
         return $true
@@ -485,15 +701,17 @@ function Resolve-SSRSCredentials {
         [object]$Config,
         [switch]$PromptForCredentials,
         [string]$User,
-        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '', Justification = 'Backward compatibility - password is masked in logs')]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '', Justification = 'Backward compatibility')]
         [string]$Password
     )
     
     Write-Log "Resolving authentication credentials..." -Level "INFO"
+    Write-Log "Config: UseCurrentUser=$($Config.Security.Authentication.UseCurrentUser), PromptForCredentials=$($Config.Security.Authentication.PromptForCredentials)" -Level "INFO"
+    Write-Log "Parameters: PromptForCredentials=$($PromptForCredentials.IsPresent), User=$User" -Level "INFO"
     
     # Priority 1: Use provided User and Password parameters
     if ($User -and $Password) {
-        Write-Log "Using provided username and password for user: $User (password masked)" -Level "INFO"
+        Write-Log "Using provided username and password for user: $User" -Level "INFO"
         try {
             $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
             $Credential = New-Object System.Management.Automation.PSCredential($User, $SecurePassword)
@@ -511,13 +729,13 @@ function Resolve-SSRSCredentials {
     }
     
     # Priority 3: Use current user if configured (default)
-    if ($Config.Security.Authentication.UseCurrentUser -and -not $PromptForCredentials -and -not $Config.Security.Authentication.PromptForCredentials) {
+    if ($Config.Security.Authentication.UseCurrentUser -and -not $PromptForCredentials.IsPresent -and -not $Config.Security.Authentication.PromptForCredentials) {
         Write-Log "Using current user Windows authentication" -Level "INFO"
         return $null  # null means use current user context
     }
     
     # Priority 4: Check if prompt is requested or configured
-    if ($PromptForCredentials -or $Config.Security.Authentication.PromptForCredentials) {
+    if ($PromptForCredentials.IsPresent -or $Config.Security.Authentication.PromptForCredentials) {
         Write-Log "Prompting for credentials..." -Level "INFO"
         
         try {
@@ -525,10 +743,20 @@ function Resolve-SSRSCredentials {
             if ($Cred) {
                 Write-Log "Credentials provided for user: $($Cred.UserName)" -Level "INFO"
                 return $Cred
+            } else {
+                Write-Log "Credential prompt was cancelled by user" -Level "WARNING"
+                Write-Log "Deployment cannot continue without proper authentication" -Level "ERROR"
+                throw "Authentication cancelled by user. Deployment stopped."
             }
+        }
+        catch [System.Management.Automation.ParameterBindingException] {
+            Write-Log "Credential prompt was cancelled by user" -Level "WARNING"
+            Write-Log "Deployment cannot continue without proper authentication" -Level "ERROR"
+            throw "Authentication cancelled by user. Deployment stopped."
         }
         catch {
             Write-Log "Failed to get credentials from prompt: $($_.Exception.Message)" -Level "WARNING"
+            throw "Failed to obtain credentials. Deployment stopped."
         }
     }
     
@@ -539,7 +767,7 @@ function Resolve-SSRSCredentials {
     }
     
     # Priority 5: Create credential from config if username is provided
-    if ($Config.Security.Authentication.Username) {
+    if ($Config.Security.Authentication.Username -and $Config.Security.Authentication.Username.Trim() -ne "") {
         Write-Log "Creating credential from configuration for user: $($Config.Security.Authentication.Username)" -Level "INFO"
         
         # Prompt for password since we shouldn't store passwords in config
@@ -586,7 +814,7 @@ function Start-SSRSDeployment {
         $ResolvedTargetFolder = if ($TargetFolder) { 
             $TargetFolder 
         } else {
-            "/"  # Deploy to root, subfolders will be created based on RDL-Files structure
+            "/"  # Root folder - reports will be deployed based on RDL-Files folder structure
         }
         
         Write-Log "Deployment Parameters:" -Level "INFO"
@@ -597,7 +825,16 @@ function Start-SSRSDeployment {
         Write-Log "  Log File: $LogFile" -Level "INFO"
         
         # Resolve credentials
-        $ResolvedCredential = Resolve-SSRSCredentials -ProvidedCredential $Credential -Config $Config -PromptForCredentials $PromptForCredentials -User $User -Password $Password
+        $ResolveParams = @{
+            ProvidedCredential = $Credential
+            Config = $Config
+            User = $User
+            Password = $Password
+        }
+        if ($PromptForCredentials.IsPresent) {
+            $ResolveParams.PromptForCredentials = $true
+        }
+        $ResolvedCredential = Resolve-SSRSCredentials @ResolveParams
         
         if ($ResolvedCredential) {
             Write-Log "  Authentication: Using credentials for $($ResolvedCredential.UserName)" -Level "INFO"
@@ -617,7 +854,7 @@ function Start-SSRSDeployment {
         
         # Deploy components in order
         if ($Config.Deployment.CreateDataSources) {
-            Publish-DataSources -Config $Config -Environment $Environment -DataSourcesPath (Join-Path $ScriptPath "Deploy\DataSources") -Credential $ResolvedCredential
+            Publish-DataSources -Config $Config -Environment $Environment -DataSourcesPath (Join-Path $ScriptPath "Deploy\Data Sources") -Credential $ResolvedCredential
         }
         
         if ($Config.Deployment.CreateDataSets) {

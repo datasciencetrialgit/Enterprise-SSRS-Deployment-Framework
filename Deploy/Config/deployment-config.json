@@ -1,19 +1,33 @@
 {
   "DataSources": {
     "DefaultConnectionStrings": {
-      "Dev": "Data Source=data\\datas;Initial Catalog=AdventureWorks2019;Integrated Security=True",
-      "Test": "Data Source=data\\datas;Initial Catalog=AdventureWorks2019;Integrated Security=True",
-      "Prod": "Data Source=data\\datas;Initial Catalog=AdventureWorks2019;Integrated Security=True"
+      "Dev": "Data Source=data;Initial Catalog=DeployTest;Integrated Security=True",
+      "Test": "Data Source=data;Initial Catalog=DeployTest;Integrated Security=True",
+      "Prod": "Data Source=data;Initial Catalog=DeployTest;Integrated Security=True"
     },
     "Extension": "SQL",
     "CredentialRetrieval": "Integrated"
   },
   "Deployment": {
     "CreateFolders": true,
-    "OverwriteExisting": true,
+    "OverwriteExisting": {
+      "DataSources": true,
+      "DataSets": true,
+      "Reports": true
+    },
     "CreateDataSources": true,
     "CreateDataSets": true,
     "CreateReports": true
+  },
+  "ReferenceMappings": {
+    "DataSources": {
+      "AutoMapping": true,
+      "CustomMappings": {}
+    },
+    "DataSets": {
+      "AutoMapping": true,
+      "CustomMappings": {}
+    }
   },
   "Security": {
     "Authentication": {
@@ -21,17 +35,7 @@
       "PromptForCredentials": false,
       "Domain": "",
       "Username": ""
-    },
-    "DefaultRoles": [
-      {
-        "GroupUserName": "BUILTIN\\Administrators",
-        "Roles": ["Content Manager"]
-      },
-      {
-        "GroupUserName": "Everyone",
-        "Roles": ["Browser"]
-      }
-    ]
+    }
   },
   "Environments": {
     "Dev": {
