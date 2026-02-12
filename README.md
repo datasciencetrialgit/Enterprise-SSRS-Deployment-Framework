@@ -1,4 +1,4 @@
-# SSRS Deployment Package
+# Enterprise-SSRS-Deployment-Framework
 
 A comprehensive PowerShell-based deployment solution for SQL Server Reporting Services (SSRS) with **standalone functionality** - no external dependencies required!
 
