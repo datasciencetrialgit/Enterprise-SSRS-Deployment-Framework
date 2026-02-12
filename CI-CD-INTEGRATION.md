@@ -1,10 +1,10 @@
 # CI/CD Integration Guide
 
-This guide shows how to integrate the SSRS Deployment Package with various CI/CD platforms using the `-User` and `-Password` parameters for automated authentication.
+This guide shows how to integrate the Enterprise-SSRS-Deployment-Framework with various CI/CD platforms using the `-User` and `-Password` parameters for automated authentication.
 
 ## 🎯 Overview
 
-The SSRS Deployment Package supports automated deployments through:
+The Enterprise-SSRS-Deployment-Framework supports automated deployments through:
 - **Username/Password Authentication**: Perfect for service accounts in CI/CD
 - **Non-Interactive Mode**: No prompts or user input required
 - **Environment-Based Configuration**: Different settings per environment

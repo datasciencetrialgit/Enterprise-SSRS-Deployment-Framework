@@ -1,5 +1,5 @@
 # ======================================================================
-# SSRS Deployment Package - Validation Module
+# Enterprise-SSRS-Deployment-Framework - Validation Module
 # Contains deployment validation and cleanup functions
 # ======================================================================
 

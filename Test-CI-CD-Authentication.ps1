@@ -27,7 +27,7 @@ param(
 )
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "SSRS Deployment Package - CI/CD Authentication Test" -ForegroundColor Cyan
+Write-Host "Enterprise-SSRS-Deployment-Framework - CI/CD Authentication Test" -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host ""
 

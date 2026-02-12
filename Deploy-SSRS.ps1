@@ -1,12 +1,12 @@
 # ======================================================================
-# SSRS Deployment Package
+# Enterprise-SSRS-Deployment-Framework
 # PowerShell Script for deploying SSRS Reports, DataSources, and DataSets
 # Based on Microsoft ReportingServicesTools
 # ======================================================================
 
 <#
 .SYNOPSIS
-    Comprehensive SSRS Deployment Package for deploying reports, data sources, and datasets.
+    Comprehensive Enterprise-SSRS-Deployment-Framework for deploying reports, data sources, and datasets.
 
 .DESCRIPTION
     This script provides a complete deployment solution for SQL Server Reporting Services (SSRS).
@@ -796,7 +796,7 @@ function Resolve-SSRSCredentials {
 # ======================================================================
 
 function Start-SSRSDeployment {
-    Write-Banner "SSRS DEPLOYMENT PACKAGE STARTED"
+    Write-Banner "ENTERPRISE-SSRS-DEPLOYMENT-FRAMEWORK STARTED"
     
     try {
         # Load configuration first
