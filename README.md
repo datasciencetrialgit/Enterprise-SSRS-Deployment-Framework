@@ -14,6 +14,14 @@ A comprehensive PowerShell-based deployment solution for SQL Server Reporting Se
 - **Configuration Management**: JSON-based configuration with environment-specific settings
 - **Built-in SSRS Web Service Client**: Direct SSRS server communication
 
+## 🔒 Security
+
+Security is a top priority for this project. Please review our [Security Policy](SECURITY.md) for:
+- Reporting security vulnerabilities
+- Security best practices for deployment
+- Credential management guidelines
+- CI/CD security recommendations
+
 ## 📁 Project Structure
 
 ```
@@ -341,15 +349,19 @@ Add `-Verbose` parameter for detailed output:
 
 ## 🤝 Contributing
 
-Feel free to enhance this deployment package:
-- Add new features or improvements
-- Report issues or bugs
-- Submit pull requests
-- Enhance documentation
+We welcome contributions from the community! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
+- How to submit bug reports and feature requests
+- Development workflow and coding standards
+- Pull request process
+- Code of conduct
+
+Please also review our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
 ## 📄 License
 
-This project is based on Microsoft ReportingServicesTools which is licensed under the MIT License.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+This project is based on Microsoft ReportingServicesTools which is also licensed under the MIT License.
 
 ## 🙏 Acknowledgments
 
