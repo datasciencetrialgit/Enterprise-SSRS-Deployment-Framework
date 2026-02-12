@@ -82,7 +82,7 @@ We actively welcome your pull requests! Here's how you can contribute code:
 
 4. **Test the Setup**
    ```powershell
-   .\Setup-Package.ps1
+   .\Deploy-SSRS.ps1 -Environment "Dev" -WhatIf
    ```
 
 ## Development Workflow
