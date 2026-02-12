@@ -97,7 +97,7 @@ This follows the **Single Responsibility Principle** at the module level:
 ### 📁 **Optimal File Structure:**
 
 ```
-SSRS-Deployment-Package/
+Enterprise-SSRS-Deployment-Framework/
 ├── Deploy-SSRS.ps1                    # Main orchestrator (modularized)
 ├── SSRS-Core-Functions.ps1             # Core SSRS API (monolithic) ⭐
 ├── SSRS-Helper-Functions.ps1           # RDL/RSD processing (could be modularized)

@@ -1,5 +1,5 @@
 # ======================================================================
-# SSRS Deployment Package - Configuration Module
+# Enterprise-SSRS-Deployment-Framework - Configuration Module
 # Contains configuration management functions
 # ======================================================================
 

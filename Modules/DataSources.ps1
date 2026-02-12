@@ -1,5 +1,5 @@
 # ======================================================================
-# SSRS Deployment Package - DataSources Module
+# Enterprise-SSRS-Deployment-Framework - DataSources Module
 # Contains data source deployment functions
 # ======================================================================
 

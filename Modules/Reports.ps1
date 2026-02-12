@@ -1,5 +1,5 @@
 # ======================================================================
-# SSRS Deployment Package - Reports Module
+# Enterprise-SSRS-Deployment-Framework - Reports Module
 # Contains report deployment functions
 # ======================================================================
 

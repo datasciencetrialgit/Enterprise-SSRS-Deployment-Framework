@@ -1,7 +1,7 @@
-# SSRS Deployment Package - Modular Architecture
+# Enterprise-SSRS-Deployment-Framework - Modular Architecture
 
 ## Overview
-The SSRS Deployment Package has been split into a modular architecture for better maintainability and separation of concerns.
+The Enterprise-SSRS-Deployment-Framework has been split into a modular architecture for better maintainability and separation of concerns.
 
 ## Current Structure
 
@@ -138,7 +138,7 @@ The current `Deploy-SSRS.ps1` continues to work exactly as before:
 ## File Organization
 
 ```
-SSRS-Deployment-Package/
+Enterprise-SSRS-Deployment-Framework/
 ├── Deploy-SSRS.ps1                    # Main script (current working version)
 ├── Deploy-SSRS-Original-Backup.ps1    # Backup of original
 ├── SSRS-Core-Functions.ps1             # Core SSRS functions

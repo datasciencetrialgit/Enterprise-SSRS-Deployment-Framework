@@ -1,5 +1,5 @@
 # ======================================================================
-# SSRS Deployment Package - Connection Module
+# Enterprise-SSRS-Deployment-Framework - Connection Module
 # Contains SSRS connection and authentication functions
 # ======================================================================
 

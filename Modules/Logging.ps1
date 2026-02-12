@@ -1,5 +1,5 @@
 # ======================================================================
-# SSRS Deployment Package - Logging Module
+# Enterprise-SSRS-Deployment-Framework - Logging Module
 # Contains all logging and output functions
 # ======================================================================
 

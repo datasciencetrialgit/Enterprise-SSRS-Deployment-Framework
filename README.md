@@ -17,7 +17,7 @@ A comprehensive PowerShell-based deployment solution for SQL Server Reporting Se
 ## 📁 Project Structure
 
 ```
-SSRS-Deployment-Package/
+Enterprise-SSRS-Deployment-Framework/
 ├── Deploy-SSRS.ps1                 # Main deployment script
 ├── SSRS-Core-Functions.ps1         # Core SSRS web service functions
 ├── Setup-Package.ps1               # Package setup and verification script
