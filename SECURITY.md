@@ -7,7 +7,7 @@ We take security seriously and actively maintain the following versions of the E
 | Version | Supported          |
 | ------- | ------------------ |
 | Latest  | :white_check_mark: |
-| < Latest| :x:                |
+| < Latest | :x:                |
 
 We recommend always using the latest version to ensure you have the most recent security updates and bug fixes.
 
@@ -26,10 +26,6 @@ Instead, please report security vulnerabilities by:
    - Click "Report a vulnerability"
    - Provide detailed information about the vulnerability
 
-2. **Via email** (if GitHub security advisories are not available):
-   - Send details to the repository maintainers
-   - Include the word "SECURITY" in the subject line
-   - Provide detailed information about the vulnerability
 
 ### What to Include in Your Report
 

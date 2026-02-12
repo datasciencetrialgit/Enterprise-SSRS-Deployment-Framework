@@ -223,14 +223,14 @@ Use clear and descriptive commit messages:
 ```
 
 **Types:**
-- `Add:` New feature or functionality
-- `Fix:` Bug fix
-- `Update:` Changes to existing functionality
-- `Refactor:` Code refactoring without changing functionality
-- `Docs:` Documentation changes
-- `Test:` Adding or updating tests
-- `Style:` Code style changes (formatting, etc.)
-- `Chore:` Maintenance tasks
+- `Add` New feature or functionality
+- `Fix` Bug fix
+- `Update` Changes to existing functionality
+- `Refactor` Code refactoring without changing functionality
+- `Docs` Documentation changes
+- `Test` Adding or updating tests
+- `Style` Code style changes (formatting, etc.)
+- `Chore` Maintenance tasks
 
 **Examples:**
 ```
