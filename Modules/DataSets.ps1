@@ -1,5 +1,5 @@
 # ======================================================================
-# SSRS Deployment Package - DataSets Module
+# Enterprise-SSRS-Deployment-Framework - DataSets Module
 # Contains dataset deployment functions
 # ======================================================================
 
