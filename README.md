@@ -365,6 +365,7 @@ This project is based on Microsoft ReportingServicesTools which is also licensed
 
 ## 🙏 Acknowledgments
 
+- The core functions in this framework are extracted from the [Microsoft ReportingServicesTools](https://github.com/microsoft/ReportingServicesTools/tree/master/ReportingServicesTools) repository
 - Microsoft ReportingServicesTools team for the excellent PowerShell module
 - SQL Server Reporting Services community for best practices and feedback
 
